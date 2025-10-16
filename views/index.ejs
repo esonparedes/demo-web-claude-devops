@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Google</title>
+    <link rel="stylesheet" href="/public/styles.css">
+  </head>
+  <body>
+    <div class="page">
+      <header class="logo">Google</header>
+
+      <main>
+        <form method="get" action="/" class="search-form">
+          <input name="q" autofocus placeholder="Search Google or type a URL" value="<%= q %>">
+          <div class="buttons">
+            <button type="submit">Google Search</button>
+            <button type="submit" formaction="/" formmethod="get">I'm Feeling Lucky</button>
+          </div>
+        </form>
+
+        <% if (q) { %>
+          <section class="results">
+            <h2>Results for "<%= q %>"</h2>
+            <div id="results"></div>
+          </section>
+          <script>
+            fetch('/api/search?q=' + encodeURIComponent('<%= q %>'))
+              .then(r => r.json())
+              .then(data => {
+                const el = document.getElementById('results');
+                if (!data.items.length) el.innerText = 'No results';
+                else {
+                  el.innerHTML = data.items.map(i => `
+                    <article class="result-item">
+                      <a href="${i.link}">${i.title}</a>
+                      <p>${i.snippet}</p>
+                    </article>
+                  `).join('');
+                }
+              });
+          </script>
+        <% } %>
+      </main>
+    </div>
+  </body>
+  </html>
