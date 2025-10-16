@@ -40,3 +40,64 @@ docker run -p 3000:3000 demo-web-claude-devops
 Security & vulnerabilities
 
 This project uses a minimal set of dependencies and pins versions in package.json. For production use, run `npm audit` and keep dependencies updated.
+
+## AWS Deployment (Terraform)
+
+Deploy this application to AWS ECS with Fargate using the included Terraform infrastructure:
+
+### Quick Deploy
+
+```bash
+# Test locally first
+./scripts/test-local.sh
+
+# Deploy to AWS (dev environment)
+cd terraform
+terraform init
+terraform apply -var-file="environments/dev/dev.tfvars"
+
+# Build and push Docker image
+cd ..
+./scripts/build-and-push.sh dev latest
+```
+
+### Documentation
+
+- **[Deployment Guide](DEPLOYMENT.md)**: Step-by-step deployment instructions
+- **[Architecture Documentation](ARCHITECTURE.md)**: Detailed architecture and design
+- **[Terraform README](terraform/README.md)**: Complete Terraform documentation
+- **[Summary](TERRAFORM_SUMMARY.md)**: Quick overview of infrastructure
+
+### Infrastructure Includes
+
+- VPC with multi-AZ public and private subnets
+- Application Load Balancer for traffic distribution
+- ECS Fargate cluster for serverless containers
+- ECR repository for Docker images
+- Auto-scaling based on CPU, memory, and requests
+- CloudWatch logging and monitoring
+- Security groups and IAM roles
+- VPC Flow Logs for security
+
+### Estimated Costs
+
+- Development: ~$95-130/month
+- Staging: ~$130-180/month
+- Production: ~$280-500/month
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed cost breakdown and optimization tips.
+
+## Claude Code
+
+Claude Code is an agentic coding tool that lives in your terminal, understands your codebase, and helps you code faster by executing routine tasks, explaining complex code, and handling git workflows -- all through natural language commands.
+
+Install Claude Code CLI:
+
+```bash
+npm install -g @anthropic-ai/claude-code
+```
+
+Run in the current directory:
+```bash
+claude
+```
