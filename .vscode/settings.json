@@ -1,0 +1,6 @@
+{
+    "sonarlint.connectedMode.project": {
+        "connectionId": "esonparedes",
+        "projectKey": "esonparedes_demo-web-claude-devops"
+    }
+}

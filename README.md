@@ -41,6 +41,49 @@ Security & vulnerabilities
 
 This project uses a minimal set of dependencies and pins versions in package.json. For production use, run `npm audit` and keep dependencies updated.
 
+## Code Quality & CI/CD
+
+### SonarQube Integration
+
+This project includes SonarQube integration for continuous code quality analysis:
+
+- Automated code quality scans on every push and PR
+- Quality gate enforcement that **halts builds on quality issues**
+- Code coverage tracking
+- Security vulnerability detection
+- Technical debt monitoring
+
+**Setup Instructions**: See [.github/SONARQUBE_SETUP.md](.github/SONARQUBE_SETUP.md) for complete setup guide.
+
+**Required GitHub Secrets**:
+- `SONAR_TOKEN`: Authentication token from SonarQube/SonarCloud
+- `SONAR_HOST_URL`: SonarQube server URL (e.g., `https://sonarcloud.io`)
+
+### GitHub Actions Workflows
+
+The project includes several automated workflows:
+
+1. **CI Workflow** (`.github/workflows/ci.yml`)
+   - Runs tests and linting
+   - Executes SonarQube scans with quality gate checks
+   - Builds and validates Docker images
+   - Performs security scans with Trivy
+   - **Fails if SonarQube quality gate does not pass**
+
+2. **Docker Push** (`.github/workflows/docker-push.yml`)
+   - Runs SonarQube quality gate check first
+   - Builds and pushes Docker images only if quality gate passes
+   - Generates SBOM (Software Bill of Materials)
+   - **Blocks deployments if code quality is insufficient**
+
+3. **Release** (`.github/workflows/release.yml`)
+   - Creates GitHub releases for version tags
+   - Generates changelog
+
+4. **Health Check** (`.github/workflows/health-check.yml`)
+   - Daily smoke tests
+   - Validates application and container health
+
 ## AWS Deployment (Terraform)
 
 Deploy this application to AWS ECS with Fargate using the included Terraform infrastructure:
