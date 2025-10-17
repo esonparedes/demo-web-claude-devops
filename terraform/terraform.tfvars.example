@@ -1,0 +1,20 @@
+# AWS Configuration
+aws_region = "us-east-1"
+
+# Project Configuration
+project_name = "demo-web"
+environment  = "dev"
+
+# Application Configuration
+app_port       = 3000
+container_cpu  = 256
+container_memory = 512
+desired_count  = 1
+
+# Logging Configuration
+enable_logging      = true
+log_retention_days  = 7
+
+# Container Image - leave empty to use ECR latest image
+# Set to specific image URI after building and pushing to ECR
+# container_image = "123456789012.dkr.ecr.us-east-1.amazonaws.com/demo-web-dev:latest"
