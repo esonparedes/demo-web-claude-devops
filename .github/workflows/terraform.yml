@@ -1,0 +1,169 @@
+name: Terraform CI
+
+# Trigger this workflow on:
+# - Pull requests to main branch
+# - Pushes to terraform-scripts branch (for testing)
+# - Manual trigger via workflow_dispatch
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'terraform/**'
+      - '.github/workflows/terraform.yml'
+  push:
+    branches:
+      - terraform-scripts
+    paths:
+      - 'terraform/**'
+      - '.github/workflows/terraform.yml'
+  workflow_dispatch:
+    inputs:
+      terraform_action:
+        description: 'Run additional Terraform action (plan only by default)'
+        required: false
+        type: choice
+        options:
+          - plan
+          - validate-only
+        default: 'plan'
+
+# Ensure only one Terraform workflow runs at a time to prevent state conflicts
+concurrency:
+  group: terraform-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  terraform-check:
+    name: Terraform Validation and Plan
+    runs-on: ubuntu-latest
+
+    # Set working directory for all run steps
+    defaults:
+      run:
+        working-directory: ./terraform
+
+    # Minimal permissions following least-privilege principle
+    permissions:
+      contents: read
+      pull-requests: write  # Needed to post plan comments on PRs
+      id-token: write       # Needed for AWS OIDC authentication (if configured)
+
+    steps:
+      # Step 1: Checkout the repository
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Step 2: Setup Terraform CLI
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.0  # Pin to specific version for consistency
+          terraform_wrapper: true    # Enables capturing output for PR comments
+
+      # Step 3: Check Terraform formatting
+      # This ensures code follows standard formatting conventions
+      - name: Terraform Format Check
+        id: fmt
+        run: terraform fmt -check -recursive
+        continue-on-error: true  # Don't fail the workflow, just report it
+
+      # Step 4: Initialize Terraform
+      # Downloads providers and prepares working directory
+      # Using -backend=false to avoid needing AWS credentials for state
+      - name: Terraform Init
+        id: init
+        run: terraform init -backend=false
+
+      # Step 5: Validate Terraform configuration
+      # Checks syntax and internal consistency
+      - name: Terraform Validate
+        id: validate
+        run: terraform validate -no-color
+
+      # Step 6: Run Terraform Plan (requires AWS credentials)
+      # Only run if AWS credentials are available
+      - name: Configure AWS Credentials
+        if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+        id: aws-login
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+        continue-on-error: true  # Allow workflow to continue if credentials not set
+
+      # Step 7: Generate Terraform Plan
+      # Shows what changes would be made (dry-run)
+      - name: Terraform Plan
+        id: plan
+        # Only run plan if we have AWS credentials (previous step succeeded)
+        if: steps.aws-login.outcome == 'success' || steps.aws-login.outcome == 'skipped'
+        run: |
+          # Create a detailed plan and save output
+          terraform plan -no-color -out=tfplan 2>&1 | tee plan_output.txt
+
+          # Create a summary for GitHub Actions
+          echo "### Terraform Plan Summary" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          tail -20 plan_output.txt >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+        continue-on-error: true
+
+      # Step 8: Post plan results as PR comment
+      # Makes it easy to review infrastructure changes directly in PR
+      - name: Post Plan to Pull Request
+        if: github.event_name == 'pull_request' && steps.plan.outcome == 'success'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('./terraform/plan_output.txt', 'utf8');
+            const output = `#### Terraform Format and Style 🖌\`${{ steps.fmt.outcome }}\`
+            #### Terraform Initialization ⚙️\`${{ steps.init.outcome }}\`
+            #### Terraform Validation 🤖\`${{ steps.validate.outcome }}\`
+            #### Terraform Plan 📖\`${{ steps.plan.outcome }}\`
+
+            <details><summary>Show Plan</summary>
+
+            \`\`\`terraform
+            ${plan}
+            \`\`\`
+
+            </details>
+
+            *Workflow: \`${{ github.workflow }}\`, Action: \`${{ github.event_name }}\`, Run: [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})*`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            });
+
+      # Step 9: Final status check
+      # Fail the workflow if any critical step failed
+      - name: Check Results
+        if: steps.init.outcome == 'failure' || steps.validate.outcome == 'failure'
+        run: |
+          echo "❌ Terraform validation failed!"
+          echo "- Format Check: ${{ steps.fmt.outcome }}"
+          echo "- Init: ${{ steps.init.outcome }}"
+          echo "- Validate: ${{ steps.validate.outcome }}"
+          echo "- Plan: ${{ steps.plan.outcome }}"
+          exit 1
+
+      # Step 10: Success summary
+      - name: Validation Success
+        if: steps.init.outcome == 'success' && steps.validate.outcome == 'success'
+        run: |
+          echo "✅ Terraform validation passed!"
+          echo "- Format Check: ${{ steps.fmt.outcome }}"
+          echo "- Init: ${{ steps.init.outcome }}"
+          echo "- Validate: ${{ steps.validate.outcome }}"
+          echo "- Plan: ${{ steps.plan.outcome }}"
+          echo ""
+          echo "Note: This workflow only validates and plans. It does NOT apply changes."
+          echo "To apply changes, run 'terraform apply' manually after reviewing the plan."
