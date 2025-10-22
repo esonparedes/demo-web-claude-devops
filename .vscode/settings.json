@@ -1,0 +1,8 @@
+{
+    "sonarlint.connectedMode.project": {
+        "connectionId": "esonparedes",
+        "projectKey": "esonparedes_demo-web-claude-devops"
+    },
+    "python-envs.defaultEnvManager": "ms-python.python:system",
+    "python-envs.pythonProjects": []
+}

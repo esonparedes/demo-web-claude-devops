@@ -1,0 +1,116 @@
+name: CD - Build, Push to ECR, and Deploy to ECS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-push:
+    name: Build and Push to ECR
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+
+    outputs:
+      image-uri: ${{ steps.image.outputs.uri }}
+      image-tag: ${{ steps.image.outputs.tag }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag, and push image to Amazon ECR
+        id: image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+                       -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          echo "uri=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+          echo "tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+      - name: Print image URI
+        run: echo "Pushed image to ${{ steps.image.outputs.uri }}"
+
+  deploy-to-ecs:
+    name: Deploy to ECS
+    runs-on: ubuntu-latest
+    needs: build-and-push
+
+    permissions:
+      contents: read
+      id-token: write
+
+    environment:
+      name: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Download task definition
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition ${{ secrets.ECS_TASK_DEFINITION }} \
+            --region ${{ secrets.AWS_REGION }} \
+            --query taskDefinition > task-definition.json
+
+      - name: Update task definition with new image
+        id: task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: ${{ secrets.CONTAINER_NAME }}
+          image: ${{ needs.build-and-push.outputs.image-uri }}
+
+      - name: Deploy to ECS service
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition: ${{ steps.task-def.outputs.task-definition }}
+          service: ${{ secrets.ECS_SERVICE }}
+          cluster: ${{ secrets.ECS_CLUSTER }}
+          wait-for-service-stability: true
+
+      - name: Deployment Success
+        run: |
+          echo "Successfully deployed image: ${{ needs.build-and-push.outputs.image-uri }}"
+          echo "To the ECS service: ${{ secrets.ECS_SERVICE }}"
+          echo "In cluster: ${{ secrets.ECS_CLUSTER }}"
