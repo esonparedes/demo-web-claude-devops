@@ -216,16 +216,16 @@ resource "aws_security_group" "alb" {
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-    description = "Allow HTTP from anywhere"
+    cidr_blocks = [data.aws_vpc.default.cidr_block]
+    description = "Allow HTTP from inside the VPC only"
   }
 
   egress {
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-    description = "Allow all outbound traffic"
+    cidr_blocks = [data.aws_vpc.default.cidr_block]
+    description = "Allow outbound to inside the VPC only"
   }
 
   tags = {
@@ -248,11 +248,11 @@ resource "aws_security_group" "ecs_tasks" {
   }
 
   egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
-    description = "Allow all outbound traffic"
+    description = "Allow outbound HTTPS traffic"
   }
 
   tags = {
@@ -260,10 +260,95 @@ resource "aws_security_group" "ecs_tasks" {
   }
 }
 
+# Collect route tables in the VPC so we can attach gateway endpoints (S3)
+data "aws_route_tables" "vpc" {
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.default.id]
+  }
+}
+
+# Security group used by interface VPC endpoints (ECR API and ECR DKR)
+resource "aws_security_group" "vpc_endpoints" {
+  name        = "${var.project_name}-endpoints-sg-${var.environment}"
+  description = "Security group for VPC interface endpoints (ECR)"
+  vpc_id      = data.aws_vpc.default.id
+
+  # Allow ECS tasks to talk to the interface endpoints over HTTPS
+  ingress {
+    from_port       = 443
+    to_port         = 443
+    protocol        = "tcp"
+    security_groups = [aws_security_group.ecs_tasks.id]
+    description     = "Allow ECS tasks to reach VPC endpoints"
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = [data.aws_vpc.default.cidr_block]
+    description = "Allow endpoints to communicate inside the VPC"
+  }
+
+  tags = {
+    Name = "${var.project_name}-endpoints-sg"
+  }
+}
+
+# VPC Interface Endpoint for ECR API (GetAuthorizationToken etc.)
+resource "aws_vpc_endpoint" "ecr_api" {
+  vpc_id              = data.aws_vpc.default.id
+  service_name        = "com.amazonaws.${var.aws_region}.ecr.api"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = data.aws_subnets.default.ids
+  security_group_ids  = [aws_security_group.vpc_endpoints.id]
+  private_dns_enabled = true
+}
+
+# VPC Interface Endpoint for ECR DKR (registry)
+resource "aws_vpc_endpoint" "ecr_dkr" {
+  vpc_id              = data.aws_vpc.default.id
+  service_name        = "com.amazonaws.${var.aws_region}.ecr.dkr"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = data.aws_subnets.default.ids
+  security_group_ids  = [aws_security_group.vpc_endpoints.id]
+  private_dns_enabled = true
+}
+
+# CloudWatch Logs interface endpoint so tasks can write logs to CloudWatch without internet
+resource "aws_vpc_endpoint" "cloudwatch_logs" {
+  vpc_id              = data.aws_vpc.default.id
+  service_name        = "com.amazonaws.${var.aws_region}.logs"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = data.aws_subnets.default.ids
+  security_group_ids  = [aws_security_group.vpc_endpoints.id]
+  private_dns_enabled = true
+}
+
+# CloudWatch Monitoring (for metrics) interface endpoint
+resource "aws_vpc_endpoint" "cloudwatch_monitoring" {
+  vpc_id              = data.aws_vpc.default.id
+  service_name        = "com.amazonaws.${var.aws_region}.monitoring"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = data.aws_subnets.default.ids
+  security_group_ids  = [aws_security_group.vpc_endpoints.id]
+  private_dns_enabled = true
+}
+
+# Gateway VPC Endpoint for S3 so image layers can be downloaded without internet
+resource "aws_vpc_endpoint" "s3" {
+  vpc_id            = data.aws_vpc.default.id
+  service_name      = "com.amazonaws.${var.aws_region}.s3"
+  vpc_endpoint_type = "Gateway"
+  route_table_ids   = data.aws_route_tables.vpc.ids
+}
+
 # Application Load Balancer
 resource "aws_lb" "app" {
-  name               = "${var.project_name}-alb-${var.environment}"
-  internal           = false
+  name = "${var.project_name}-alb-${var.environment}"
+  # Make the ALB internal so it only has private IPs in the VPC
+  internal           = true
   load_balancer_type = "application"
   security_groups    = [aws_security_group.alb.id]
   subnets            = data.aws_subnets.default.ids
@@ -320,9 +405,10 @@ resource "aws_ecs_service" "app" {
   launch_type     = "FARGATE"
 
   network_configuration {
-    subnets          = data.aws_subnets.default.ids
-    security_groups  = [aws_security_group.ecs_tasks.id]
-    assign_public_ip = true
+    subnets         = data.aws_subnets.default.ids
+    security_groups = [aws_security_group.ecs_tasks.id]
+    # Do not assign public IPs to tasks; ALB is internal and routes traffic within the VPC
+    assign_public_ip = false
   }
 
   load_balancer {

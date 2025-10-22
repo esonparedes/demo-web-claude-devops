@@ -1,6 +1,44 @@
+# Node / npm
 node_modules
 npm-debug.log
+*.log
+logs
+.npm
+
+# Dev / IDE
+.vscode
+.idea
+*.iml
+*.sublime-workspace
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Build / coverage / test artifacts
+coverage
+.nyc_output
+dist
+build
+tmp
+temp
+
+# Env / secrets
+.env
+.env.*
+.terraform
+.terraform.lock.hcl
+
+# Repo / CI / infra
 Dockerfile
 .git
-coverage
-.vscode
+.github
+terraform
+terraform-ec2
+scripts
+sonarqube-aws
+sonarqube-infra
+
+# Other
+.sass-cache
+.vagrant

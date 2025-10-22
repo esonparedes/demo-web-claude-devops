@@ -11,7 +11,7 @@ output "ecr_repository_arn" {
 
 # Load Balancer Output
 output "load_balancer_dns" {
-  description = "DNS name of the Application Load Balancer (use this to access your application)"
+  description = "DNS name of the Application Load Balancer (INTERNAL - resolvable only inside the VPC or connected networks)"
   value       = aws_lb.app.dns_name
 }
 
@@ -21,7 +21,7 @@ output "load_balancer_arn" {
 }
 
 output "load_balancer_url" {
-  description = "Full URL to access the application (add http:// prefix)"
+  description = "Full URL to access the application (INTERNAL - reachable only inside the VPC or via VPN/peering). Prepend http:// when using from inside the VPC."
   value       = "http://${aws_lb.app.dns_name}"
 }
 
@@ -49,6 +49,6 @@ output "deployment_info" {
     cluster_name   = aws_ecs_cluster.app.name
     service_name   = aws_ecs_service.app.name
     alb_dns_name   = aws_lb.app.dns_name
-    app_url        = "http://${aws_lb.app.dns_name}"
+    app_url        = "http://${aws_lb.app.dns_name} (INTERNAL - reachable only from within the VPC or connected networks)"
   }
 }
